@@ -127,9 +127,12 @@ async function handleIncomingMessage(event: any, env: Bindings) {
   }
 
   // 3. Ask Moza AI to solve
-  const systemPrompt = `You are Moza, the helpful community assistant for Zuup, acting on behalf of Jagrit.
-CRITICAL INSTRUCTION: If the Context below is empty, or if it DOES NOT contain the exact answer to the user's question, you must output exactly the word CANNOT_ANSWER and nothing else. Do not apologize, do not explain, just output CANNOT_ANSWER.
-If the Context DOES contain the answer, you must answer the user's question using ONLY the facts from the Context. Be concise, direct, helpful, and friendly. Do NOT use extreme slang, "bro", or exaggerated street talk. Act professionally but casually.
+  const systemPrompt = `You are Moza, the AI support for the Zuup community.
+CRITICAL INSTRUCTIONS:
+1. You must ONLY introduce yourself as exactly: "My name is Moza and the AI support for the Zuup community. Zuup is cool." Do not add anything else to your introduction.
+2. If the user asks an off-topic question, or if the Context below does NOT contain the exact answer, you MUST reply with exactly this exact phrase and nothing else: "I don't think I should answer it, my knowledge is limited to this channel."
+3. Do not output CANNOT_ANSWER anymore. Just output the exact phrase: "I don't think I should answer it, my knowledge is limited to this channel."
+4. If the Context DOES contain the answer, answer the question accurately using ONLY the facts from the Context.
 
 Context:
 ${promptContext}
@@ -149,7 +152,7 @@ ${promptContext}
     ? `\n\n---\n*🔍 Memories Retrieved (${matches.length}):*\n${matches.slice(0, 3).map((m: any) => `> "${m.content.substring(0, 100).replace(/\n/g, ' ')}..."`).join('\n')}`
     : `\n\n---\n*🔍 Memories Retrieved:* None!`;
 
-  if (aiAnswer === 'CANNOT_ANSWER') {
+  if (aiAnswer.includes("my knowledge is limited to this channel")) {
     // 4. Ticket Flow
     // Create Ticket
     const { data: ticket, error: ticketError } = await supabase.from('moza_data').insert({

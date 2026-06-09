@@ -1,0 +1,20 @@
+{
+  "name": "moza-help-bot",
+  "version": "1.0.0",
+  "description": "Slack bot to answer questions and assign tickets",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.43.4",
+    "hono": "^4.4.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240529.0",
+    "typescript": "^5.0.4",
+    "wrangler": "^3.57.2"
+  }
+}

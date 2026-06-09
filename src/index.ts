@@ -78,6 +78,23 @@ app.post('/slack/interactivity', async (c) => {
   return c.text('ok');
 });
 
+// --- BULK INGESTION HANDLER ---
+app.post('/slack/ingest-batch', async (c) => {
+  const authHeader = c.req.header('Authorization');
+  if (authHeader !== `Bearer ${c.env.SLACK_BOT_TOKEN}`) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const { messages } = await c.req.json();
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return c.json({ error: 'Invalid payload' }, 400);
+  }
+
+  c.executionCtx.waitUntil(handleBulkIngest(messages, c.env).catch(e => console.error("Bulk ingest error:", e)));
+  
+  return c.json({ status: 'processing', count: messages.length });
+});
+
 // --- CORE LOGIC ---
 
 async function handleIncomingMessage(event: any, env: Bindings) {
@@ -92,8 +109,8 @@ async function handleIncomingMessage(event: any, env: Bindings) {
   // 2. Query Supabase RPC for similar knowledge
   const { data: matches, error } = await supabase.rpc('match_moza_knowledge', {
     query_embedding: vector,
-    match_threshold: 0.75,
-    match_count: 3
+    match_threshold: 0.50,
+    match_count: 5
   });
 
   let promptContext = "";
@@ -102,9 +119,10 @@ async function handleIncomingMessage(event: any, env: Bindings) {
   }
 
   // 3. Ask Moza AI to solve
-  const systemPrompt = `You are Moza, the energetic and rebellious mascot of Zuup. You speak with excitement, use words like "Zuup Zuup!" and use emojis. 
-Your job is to answer user questions based ONLY on the following past solutions. 
-If the past context doesn't have the answer, you MUST reply with exactly "CANNOT_ANSWER".
+  const systemPrompt = `You are a digital clone of Jagrit, the community admin for Zuup.
+You speak EXACTLY like Jagrit based on the context of past messages provided below. Adopt his tone, slang, excitement level, and communication style perfectly.
+CRITICAL RULE: You must ONLY answer using the facts found in the "Context" below. 
+If the Context is completely empty or does not contain the answer, you MUST reply with exactly the word CANNOT_ANSWER and nothing else. Never guess or hallucinate facts (especially websites or dates).
 
 Context:
 ${promptContext}
@@ -274,6 +292,28 @@ async function sendEphemeralResponse(token: string, user: string, text: string) 
       text: text
     })
   });
+}
+
+async function handleBulkIngest(messages: string[], env: Bindings) {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY);
+  
+  for (const text of messages) {
+    try {
+      // 1. Generate Embedding
+      const { data: embeddings } = await env.AI.run('@cf/baai/bge-base-en-v1.5', { text: [text] });
+      const vector = embeddings[0];
+
+      // 2. Store in Supabase
+      await supabase.from('moza_data').insert({
+        type: 'knowledge',
+        content: text,
+        metadata: { source: 'slack_export', answer: 'Inferred from context' },
+        embedding: vector
+      });
+    } catch (e) {
+      console.error("Failed to ingest message:", text, e);
+    }
+  }
 }
 
 export default app;

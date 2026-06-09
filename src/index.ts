@@ -200,11 +200,11 @@ async function handleIncomingMessage(event: any, env: Bindings) {
 
   // 3. Ask Moza AI to solve
   const systemPrompt = `You are Moza, the AI support for the Zuup community.
-CRITICAL INSTRUCTIONS:
-1. You must ONLY introduce yourself as exactly: "My name is Moza and the AI support for the Zuup community. Zuup is cool." Do not add anything else to your introduction.
-2. If the user asks an off-topic question, or if the Context below does NOT contain the exact answer, you MUST reply with exactly this exact phrase and nothing else: "I don't think I should answer it, my knowledge is limited to this channel."
-3. Do not output CANNOT_ANSWER anymore. Just output the exact phrase: "I don't think I should answer it, my knowledge is limited to this channel."
-4. If the Context DOES contain the answer, answer the question accurately using ONLY the facts from the Context.
+CRITICAL INSTRUCTIONS — follow these strictly:
+1. ONLY answer using facts from the Context below. Do not use any outside knowledge.
+2. If the Context does NOT clearly contain the answer, output exactly the single word: NO_ANSWER
+3. If someone asks who you are, output: NO_ANSWER (your intro is handled separately)
+4. Do NOT greet, pad, or add filler. Just answer the question directly and concisely.
 
 Context:
 ${promptContext}
@@ -224,49 +224,42 @@ ${promptContext}
     ? `\n\n---\n*🔍 Memories Retrieved (${finalMatches.length}):*\n${finalMatches.slice(0, 3).map((m: any) => `> "${m.content.substring(0, 100).replace(/\n/g, ' ')}..."`).join('\n')}`
     : `\n\n---\n*🔍 Memories Retrieved:* None!`;
 
-  if (aiAnswer.includes("my knowledge is limited to this channel")) {
-    // 4. Ticket Flow
-    // Create Ticket
-    const { data: ticket, error: ticketError } = await supabase.from('moza_data').insert({
+  // Universal footer added to every message
+  const footer = `\n\n---\n_🤖 Currently in testing phase — I can make mistakes. Contribute: <https://github.com/Jagrit0711/mozahelp|mozahelp> · Report bugs in <#ifoundabug>_`;
+
+  const askerTag = event.user ? `<@${event.user}>` : 'hey';
+
+  if (aiAnswer === 'NO_ANSWER' || aiAnswer.toLowerCase().includes('no_answer')) {
+    // Get the asker's name for a personal response
+    const noAnswerMsg = `Sorry ${askerTag}, I don't have an answer for this one in my memory. Looping in <@jagrit> — he should be able to help! 🙏\n_P.S. I'm an AI and can make mistakes!_${footer}`;
+
+    // Create a ticket
+    const { data: ticket } = await supabase.from('moza_data').insert({
       type: 'ticket',
       content: text,
-      metadata: { status: 'open', channel_id: channel, thread_ts: ts }
+      metadata: { status: 'open', channel_id: channel, thread_ts: ts, asker: event.user }
     }).select().single();
 
-    if (ticketError || !ticket) {
-      await postSlackMessage(env.SLACK_BOT_TOKEN, channel, ts, `Zuup... I tried to create a ticket but my database threw an error: ${JSON.stringify(ticketError)}`);
-      return;
-    }
-
-    // Fetch Managers/Solvers
     const { data: roles } = await supabase.from('moza_data').select('content').eq('type', 'role').eq('metadata->>role', 'solver');
-    const tags = roles && roles.length > 0 ? roles.map(r => `<@${r.content}>`).join(' ') : "team";
+    const tags = roles && roles.length > 0 ? roles.map((r: any) => `<@${r.content}>`).join(' ') : '<@jagrit>';
 
-    // Send Ticket Message
-    await postSlackMessage(env.SLACK_BOT_TOKEN, channel, thread_ts, 
-      `Zuup Zuup! I checked my memory but I'm not sure about this one. Tagging my solver friends! ${tags}`, 
-      [
-        {
-          type: "section",
-          text: { type: "mrkdwn", text: `I couldn't solve this automatically. Solvers, can you help?` + debugContext }
-        },
+    await postSlackMessage(env.SLACK_BOT_TOKEN, channel, thread_ts, noAnswerMsg,
+      ticket ? [
         {
           type: "actions",
-          elements: [
-            {
-              type: "button",
-              text: { type: "plain_text", text: "Escalate to Admin" },
-              style: "danger",
-              value: ticket.id,
-              action_id: "escalate_ticket"
-            }
-          ]
+          elements: [{
+            type: "button",
+            text: { type: "plain_text", text: "Escalate to Admin" },
+            style: "danger",
+            value: ticket.id,
+            action_id: "escalate_ticket"
+          }]
         }
-      ]
+      ] : undefined
     );
   } else {
-    // Reply with Moza's answer
-    await postSlackMessage(env.SLACK_BOT_TOKEN, channel, thread_ts, aiAnswer + debugContext);
+    // Reply with Moza's answer + footer
+    await postSlackMessage(env.SLACK_BOT_TOKEN, channel, thread_ts, aiAnswer + footer);
   }
 }
 

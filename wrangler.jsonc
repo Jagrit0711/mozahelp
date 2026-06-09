@@ -10,7 +10,7 @@
     "binding": "AI"
   },
   "vars": {
-    "SUPABASE_URL": "REPLACE_WITH_SUPABASE_URL"
+    "SUPABASE_URL": "https://qnapwukqhybziduhzpow.supabase.co"
   },
   "observability": {
     "enabled": true

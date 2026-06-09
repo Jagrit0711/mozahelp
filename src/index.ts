@@ -25,6 +25,13 @@ app.post('/slack/events', async (c) => {
     
     if (event.bot_id) return c.text('ok'); // Ignore bots
 
+    // When bot is added to a channel, auto-ingest the channel history
+    if (event.type === 'member_joined_channel' && event.user === body.authorizations?.[0]?.user_id) {
+      c.executionCtx.waitUntil(
+        ingestChannelHistory(event.channel, c.env).catch(e => console.error("Error ingesting channel history:", e))
+      );
+    }
+
     if ((event.type === 'message' && event.channel_type === 'channel') || event.type === 'app_mention') {
       c.executionCtx.waitUntil(
         handleIncomingMessage(event, c.env).catch(async (e) => {
@@ -105,6 +112,67 @@ app.delete('/slack/wipe-knowledge', async (c) => {
 
 // --- CORE LOGIC ---
 
+// Auto-ingest all channel history when bot joins a channel
+async function ingestChannelHistory(channelId: string, env: Bindings) {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY);
+  
+  // Notify the channel that Moza is reading history
+  await fetch('https://slack.com/api/chat.postMessage', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${env.SLACK_BOT_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channel: channelId, text: "📚 Hey! I'm Moza, the AI support for the Zuup community. I'm reading through this channel's history so I can answer questions. Give me a moment!" })
+  });
+
+  let allMessages: any[] = [];
+  let cursor: string | undefined;
+
+  // Paginate through ALL channel history
+  do {
+    const params: any = { channel: channelId, limit: 200 };
+    if (cursor) params.cursor = cursor;
+    const qs = new URLSearchParams(params).toString();
+    const res = await fetch(`https://slack.com/api/conversations.history?${qs}`, {
+      headers: { 'Authorization': `Bearer ${env.SLACK_BOT_TOKEN}` }
+    });
+    const data: any = await res.json();
+    if (!data.ok) break;
+    const validMsgs = (data.messages || []).filter((m: any) => !m.bot_id && !m.subtype && typeof m.text === 'string' && m.text.length > 5);
+    allMessages = allMessages.concat(validMsgs.reverse()); // reverse so oldest first
+    cursor = data.response_metadata?.next_cursor;
+  } while (cursor);
+
+  if (allMessages.length === 0) return;
+
+  // Sliding window chunking: 10 msgs per chunk, step of 5
+  const CHUNK_SIZE = 10;
+  const STEP_SIZE = 5;
+  for (let i = 0; i < allMessages.length; i += STEP_SIZE) {
+    const chunk = allMessages.slice(i, i + CHUNK_SIZE);
+    const chunkText = chunk.map((m: any) => m.text).join('\n\n');
+
+    try {
+      const { data: embeddings } = await env.AI.run('@cf/baai/bge-base-en-v1.5', { text: [chunkText] });
+      await supabase.from('moza_data').insert({
+        type: 'knowledge',
+        content: chunkText,
+        metadata: { channel_id: channelId, source: 'channel_history' },
+        embedding: embeddings[0]
+      });
+    } catch (e) {
+      console.error('Error embedding chunk:', e);
+    }
+
+    if (i + CHUNK_SIZE >= allMessages.length) break;
+  }
+
+  // Notify done
+  await fetch('https://slack.com/api/chat.postMessage', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${env.SLACK_BOT_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channel: channelId, text: `✅ Done! I've read ${allMessages.length} messages from this channel. Ask me anything!` })
+  });
+}
+
 async function handleIncomingMessage(event: any, env: Bindings) {
   const { text, channel, ts } = event;
   const thread_ts = event.thread_ts || ts;
@@ -114,16 +182,20 @@ async function handleIncomingMessage(event: any, env: Bindings) {
   const { data: embeddings } = await env.AI.run('@cf/baai/bge-base-en-v1.5', { text: [text] });
   const vector = embeddings[0];
 
-  // 2. Query Supabase RPC for similar knowledge
-  const { data: matches, error } = await supabase.rpc('match_moza_knowledge', {
+  // 2. Query Supabase RPC for similar knowledge — filtered to this channel
+  const { data: matches } = await supabase.rpc('match_moza_knowledge', {
     query_embedding: vector,
     match_threshold: 0.40,
     match_count: 20
   });
 
+  // Prefer matches from the same channel, fall back to global
+  const channelMatches = matches?.filter((m: any) => m.metadata?.channel_id === channel) || [];
+  const finalMatches = channelMatches.length > 0 ? channelMatches : (matches || []);
+
   let promptContext = "";
-  if (matches && matches.length > 0) {
-    promptContext = matches.map((m: any) => `Q: ${m.content}\nA: ${m.metadata.answer}`).join('\n\n');
+  if (finalMatches.length > 0) {
+    promptContext = finalMatches.map((m: any) => m.content).join('\n\n---\n\n');
   }
 
   // 3. Ask Moza AI to solve
@@ -148,8 +220,8 @@ ${promptContext}
   const aiAnswer = response.response.trim();
 
   // DEBUG: Show the user exactly what context was retrieved
-  const debugContext = matches && matches.length > 0 
-    ? `\n\n---\n*🔍 Memories Retrieved (${matches.length}):*\n${matches.slice(0, 3).map((m: any) => `> "${m.content.substring(0, 100).replace(/\n/g, ' ')}..."`).join('\n')}`
+  const debugContext = finalMatches.length > 0 
+    ? `\n\n---\n*🔍 Memories Retrieved (${finalMatches.length}):*\n${finalMatches.slice(0, 3).map((m: any) => `> "${m.content.substring(0, 100).replace(/\n/g, ' ')}..."`).join('\n')}`
     : `\n\n---\n*🔍 Memories Retrieved:* None!`;
 
   if (aiAnswer.includes("my knowledge is limited to this channel")) {

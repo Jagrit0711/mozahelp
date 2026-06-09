@@ -25,8 +25,8 @@ app.post('/slack/events', async (c) => {
     
     if (event.bot_id) return c.text('ok'); // Ignore bots
 
-    if (event.type === 'message' && event.channel_type === 'channel') {
-      c.executionCtx.waitUntil(handleIncomingMessage(event, c.env));
+    if ((event.type === 'message' && event.channel_type === 'channel') || event.type === 'app_mention') {
+      c.executionCtx.waitUntil(handleIncomingMessage(event, c.env).catch(e => console.error("Error handling message:", e)));
     }
   }
 
@@ -40,7 +40,7 @@ app.post('/slack/commands', async (c) => {
   const text = body.text as string;
   const userId = body.user_id as string;
   
-  c.executionCtx.waitUntil(handleCommand(command, text, userId, c.env));
+  c.executionCtx.waitUntil(handleCommand(command, text, userId, c.env).catch(e => console.error("Error handling command:", e)));
   
   // Acknowledge command receipt immediately
   return c.json({

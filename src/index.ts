@@ -82,6 +82,7 @@ app.post('/slack/interactivity', async (c) => {
 
 async function handleIncomingMessage(event: any, env: Bindings) {
   const { text, channel, ts } = event;
+  const thread_ts = event.thread_ts || ts;
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY);
 
   // 1. Generate Embedding
@@ -137,7 +138,7 @@ ${promptContext}
     const tags = roles && roles.length > 0 ? roles.map(r => `<@${r.content}>`).join(' ') : "team";
 
     // Send Ticket Message
-    await postSlackMessage(env.SLACK_BOT_TOKEN, channel, ts, 
+    await postSlackMessage(env.SLACK_BOT_TOKEN, channel, thread_ts, 
       `Zuup Zuup! I checked my memory but I'm not sure about this one. Tagging my solver friends! ${tags}`, 
       [
         {
@@ -160,7 +161,7 @@ ${promptContext}
     );
   } else {
     // Reply with Moza's answer
-    await postSlackMessage(env.SLACK_BOT_TOKEN, channel, ts, aiAnswer);
+    await postSlackMessage(env.SLACK_BOT_TOKEN, channel, thread_ts, aiAnswer);
   }
 }
 

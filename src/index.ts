@@ -32,7 +32,11 @@ app.post('/slack/events', async (c) => {
       );
     }
 
-    if ((event.type === 'message' && event.channel_type === 'channel') || event.type === 'app_mention') {
+    // ONLY respond when directly @mentioned OR when someone asks a question
+    const isMention = event.type === 'app_mention';
+    const isQuestion = event.type === 'message' && event.channel_type === 'channel' && typeof event.text === 'string' && event.text.includes('?');
+
+    if (isMention || isQuestion) {
       c.executionCtx.waitUntil(
         handleIncomingMessage(event, c.env).catch(async (e) => {
           console.error("Error handling message:", e);

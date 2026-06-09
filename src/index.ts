@@ -107,11 +107,16 @@ ${promptContext}
   if (aiAnswer === 'CANNOT_ANSWER') {
     // 4. Ticket Flow
     // Create Ticket
-    const { data: ticket } = await supabase.from('moza_data').insert({
+    const { data: ticket, error: ticketError } = await supabase.from('moza_data').insert({
       type: 'ticket',
       content: text,
       metadata: { status: 'open', channel_id: channel, thread_ts: ts }
     }).select().single();
+
+    if (ticketError || !ticket) {
+      await postSlackMessage(env.SLACK_BOT_TOKEN, channel, ts, `Zuup... I tried to create a ticket but my database threw an error: ${JSON.stringify(ticketError)}`);
+      return;
+    }
 
     // Fetch Managers/Solvers
     const { data: roles } = await supabase.from('moza_data').select('content').eq('type', 'role').eq('metadata->>role', 'solver');

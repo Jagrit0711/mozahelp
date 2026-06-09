@@ -3,11 +3,11 @@ import path from 'path';
 
 // --- CONFIGURATION ---
 const WORKER_URL = 'https://moza-help-bot.zuup.workers.dev'; // Replace if needed
-const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || 'xoxb-your-token-here'; 
+const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || 'xoxb-your-token-here';
 const BATCH_SIZE = 10; // Process 10 messages at a time
 const DELAY_MS = 2000; // 2 seconds between batches
 
-const exportDir = process.argv[2];
+const exportDir = process.argv.slice(2).join(' ');
 
 if (!exportDir) {
   console.error("Usage: ts-node scripts/ingest.ts <path_to_slack_export_folder>");
@@ -29,6 +29,8 @@ async function processFile(filePath: string) {
     return;
   }
 
+  if (!Array.isArray(messages)) return;
+
   // Filter out system messages, only keep real human messages with text
   const userMessages = messages
     .filter((m: any) => m.type === 'message' && !m.subtype && typeof m.text === 'string' && m.text.length > 10)
@@ -39,7 +41,7 @@ async function processFile(filePath: string) {
   for (let i = 0; i < userMessages.length; i += BATCH_SIZE) {
     const batch = userMessages.slice(i, i + BATCH_SIZE);
     console.log(`Sending batch of ${batch.length} messages to Moza...`);
-    
+
     try {
       const res = await fetch(`${WORKER_URL}/slack/ingest-batch`, {
         method: 'POST',
@@ -63,26 +65,25 @@ async function processFile(filePath: string) {
 }
 
 async function main() {
-  if (SLACK_BOT_TOKEN === 'xoxb-your-token-here') {
-    console.error("⚠️  Please set your SLACK_BOT_TOKEN inside scripts/ingest.ts before running!");
-    process.exit(1);
-  }
-
   const stat = fs.statSync(exportDir);
   if (stat.isDirectory()) {
-    // Read all JSON files in the directory
-    const files = fs.readdirSync(exportDir).filter(f => f.endsWith('.json'));
-    for (const file of files) {
-      await processFile(path.join(exportDir, file));
-    }
-    
-    // Also check subdirectories (Slack exports have folders for channels)
-    const dirs = fs.readdirSync(exportDir).filter(f => fs.statSync(path.join(exportDir, f)).isDirectory());
-    for (const dir of dirs) {
-      const subFiles = fs.readdirSync(path.join(exportDir, dir)).filter(f => f.endsWith('.json'));
-      for (const file of subFiles) {
-        await processFile(path.join(exportDir, dir, file));
+    // Recursively find all .json files
+    function getAllJsonFiles(dir: string, fileList: string[] = []) {
+      const files = fs.readdirSync(dir);
+      for (const file of files) {
+        const filePath = path.join(dir, file);
+        if (fs.statSync(filePath).isDirectory()) {
+          getAllJsonFiles(filePath, fileList);
+        } else if (filePath.endsWith('.json')) {
+          fileList.push(filePath);
+        }
       }
+      return fileList;
+    }
+
+    const allFiles = getAllJsonFiles(exportDir);
+    for (const file of allFiles) {
+      await processFile(file);
     }
   } else {
     await processFile(exportDir);

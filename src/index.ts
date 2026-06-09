@@ -80,8 +80,8 @@ app.post('/slack/interactivity', async (c) => {
 
 // --- BULK INGESTION HANDLER ---
 app.post('/slack/ingest-batch', async (c) => {
-  const authHeader = c.req.header('Authorization');
-  if (authHeader !== `Bearer ${c.env.SLACK_BOT_TOKEN}`) {
+  const authHeader = c.req.header('Authorization') || '';
+  if (authHeader.trim() !== `Bearer ${c.env.SLACK_BOT_TOKEN?.trim()}`) {
     return c.json({ error: 'Unauthorized' }, 401);
   }
 

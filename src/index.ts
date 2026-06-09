@@ -26,7 +26,21 @@ app.post('/slack/events', async (c) => {
     if (event.bot_id) return c.text('ok'); // Ignore bots
 
     if ((event.type === 'message' && event.channel_type === 'channel') || event.type === 'app_mention') {
-      c.executionCtx.waitUntil(handleIncomingMessage(event, c.env).catch(e => console.error("Error handling message:", e)));
+      c.executionCtx.waitUntil(
+        handleIncomingMessage(event, c.env).catch(async (e) => {
+          console.error("Error handling message:", e);
+          try {
+            await fetch('https://slack.com/api/chat.postMessage', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${c.env.SLACK_BOT_TOKEN}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                channel: event.channel,
+                text: `Zuup... I completely crashed! Here is the error: \`${e.message || JSON.stringify(e)}\``
+              })
+            });
+          } catch (err) {}
+        })
+      );
     }
   }
 

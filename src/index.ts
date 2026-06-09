@@ -95,6 +95,14 @@ app.post('/slack/ingest-batch', async (c) => {
   return c.json({ status: 'processing', count: messages.length });
 });
 
+// --- WIPE KNOWLEDGE HANDLER ---
+app.delete('/slack/wipe-knowledge', async (c) => {
+  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_KEY);
+  const { error } = await supabase.from('moza_data').delete().eq('type', 'knowledge');
+  if (error) return c.json({ error }, 500);
+  return c.json({ status: 'wiped' });
+});
+
 // --- CORE LOGIC ---
 
 async function handleIncomingMessage(event: any, env: Bindings) {

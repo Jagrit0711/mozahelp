@@ -7,10 +7,12 @@ const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || 'xoxb-your-token-here';
 const BATCH_SIZE = 10; // Process 10 messages at a time
 const DELAY_MS = 2000; // 2 seconds between batches
 
-const exportDir = process.argv.slice(2).join(' ');
+const args = process.argv.slice(2);
+const wipeFlag = args.includes('--wipe');
+const exportDir = args.filter(a => a !== '--wipe').join(' ');
 
 if (!exportDir) {
-  console.error("Usage: ts-node scripts/ingest.ts <path_to_slack_export_folder>");
+  console.error("Usage: ts-node scripts/ingest.ts [--wipe] <path_to_slack_export_folder>");
   process.exit(1);
 }
 
@@ -32,15 +34,24 @@ async function processFile(filePath: string) {
   if (!Array.isArray(messages)) return;
 
   // Filter out system messages, only keep real human messages with text
-  const userMessages = messages
-    .filter((m: any) => m.type === 'message' && !m.subtype && typeof m.text === 'string' && m.text.length > 10)
-    .map((m: any) => m.text);
+  const validMessages = messages.filter((m: any) => m.type === 'message' && !m.subtype && typeof m.text === 'string' && m.text.length > 5);
 
-  if (userMessages.length === 0) return;
+  if (validMessages.length === 0) return;
 
-  for (let i = 0; i < userMessages.length; i += BATCH_SIZE) {
-    const batch = userMessages.slice(i, i + BATCH_SIZE);
-    console.log(`Sending batch of ${batch.length} messages to Moza...`);
+  const CHUNK_SIZE = 10;
+  const STEP_SIZE = 5; // Overlap chunks to prevent cutting conversations in half
+  const chunks: string[] = [];
+
+  for (let i = 0; i < validMessages.length; i += STEP_SIZE) {
+    const chunkMsgs = validMessages.slice(i, i + CHUNK_SIZE);
+    const chunkText = chunkMsgs.map((m: any) => `User: ${m.text}`).join('\n\n');
+    chunks.push(chunkText);
+    if (i + CHUNK_SIZE >= validMessages.length) break;
+  }
+
+  for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+    const batch = chunks.slice(i, i + BATCH_SIZE);
+    console.log(`Sending batch of ${batch.length} conversational chunks to Moza...`);
 
     try {
       const res = await fetch(`${WORKER_URL}/slack/ingest-batch`, {
@@ -65,6 +76,21 @@ async function processFile(filePath: string) {
 }
 
 async function main() {
+  if (wipeFlag) {
+    console.log("🧹 Wiping old memories from Moza database...");
+    try {
+      const res = await fetch(`${WORKER_URL}/slack/wipe-knowledge`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${SLACK_BOT_TOKEN}` }
+      });
+      if (res.ok) console.log("✅ Database wiped successfully!");
+      else console.error("❌ Failed to wipe database:", await res.text());
+    } catch (e) {
+      console.error("❌ Network error wiping database:", e);
+    }
+    await sleep(2000);
+  }
+
   const stat = fs.statSync(exportDir);
   if (stat.isDirectory()) {
     // Recursively find all .json files

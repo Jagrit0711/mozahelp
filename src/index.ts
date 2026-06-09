@@ -138,7 +138,7 @@ ${promptContext}
 
   // DEBUG: Show the user exactly what context was retrieved
   const debugContext = matches && matches.length > 0 
-    ? `\n\n---\n*🔍 Memories Retrieved (${matches.length}):*\n${matches.slice(0, 3).map((m: any) => `> "${m.content.substring(0, 100)}..."`).join('\n')}`
+    ? `\n\n---\n*🔍 Memories Retrieved (${matches.length}):*\n${matches.slice(0, 3).map((m: any) => `> "${m.content.substring(0, 100).replace(/\n/g, ' ')}..."`).join('\n')}`
     : `\n\n---\n*🔍 Memories Retrieved:* None!`;
 
   if (aiAnswer === 'CANNOT_ANSWER') {
@@ -165,7 +165,7 @@ ${promptContext}
       [
         {
           type: "section",
-          text: { type: "mrkdwn", text: `I couldn't solve this automatically. Solvers, can you help?` }
+          text: { type: "mrkdwn", text: `I couldn't solve this automatically. Solvers, can you help?` + debugContext }
         },
         {
           type: "actions",
@@ -182,11 +182,6 @@ ${promptContext}
       ]
     );
   } else {
-    // DEBUG: Show the user exactly what context was retrieved
-    const debugContext = matches && matches.length > 0 
-      ? `\n\n---\n*🔍 Memories Retrieved (${matches.length}):*\n${matches.slice(0, 3).map((m: any) => `> "${m.content.substring(0, 100)}..."`).join('\n')}`
-      : `\n\n---\n*🔍 Memories Retrieved:* None!`;
-
     // Reply with Moza's answer
     await postSlackMessage(env.SLACK_BOT_TOKEN, channel, thread_ts, aiAnswer + debugContext);
   }
